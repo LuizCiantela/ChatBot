@@ -1,0 +1,196 @@
+<!--
+  Chatbot Técnico (JS/TS & .NET) – Frontend
+  Observações:
+  - O conteúdo Markdown é sempre SANITIZADO antes de ir para o DOM.
+-->
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Chatbot Técnico (JS/TS & .NET)</title>
+
+    <link rel="stylesheet" href="style.css" />
+
+    <!-- Libs do front:
+        - marked: converte Markdown → HTML
+        - DOMPurify: sanitiza o HTML para evitar XSS
+    -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+  </head>
+
+  <body>
+    <div class="container">
+      <div class="card">
+        <div class="title">Chatbot Técnico (JS/TS & .NET)</div>
+
+        <!-- Área do histórico. aria-live ajuda leitores de tela a anunciarem novas mensagens -->
+        <div id="chat" class="chat" aria-live="polite"></div>
+
+        <!-- Linha com input + botão. Simples, direto.  -->
+        <div class="row">
+          <input
+            id="inp"
+            placeholder="Faça sua pergunta (escopo: JS/TS/AJAX e C#/.NET)..."
+            autocomplete="off"
+            aria-label="Digite sua pergunta para o chatbot"
+          />
+          <button id="btn" aria-label="Enviar pergunta" disabled>Enviar</button>
+        </div>
+
+        <small>
+          Dica: a cada 3 respostas, um resumo das últimas 3 interações aparece
+          automaticamente.
+        </small>
+      </div>
+    </div>
+
+    <script>
+      // =============== Configuração das libs de Markdown ===============
+      // GFM: GitHub Flavored Markdown; breaks: quebras de linha simples viram <br>
+      marked.setOptions({ gfm: true, breaks: true });
+
+      // =============== Referências de elementos do DOM ===============
+      const $chat = document.getElementById("chat");
+      const $inp = document.getElementById("inp");
+      const $btn = document.getElementById("btn");
+
+      // Estado simples no front: guarda pares { q, a }
+      let history = [];
+
+      // =============== Helpers de UI ===============
+
+      // Sanitiza texto simples (para mensagens não-Markdown como "Você" e erros)
+      const escapeHtml = (s) =>
+        s.replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            }[c])
+        );
+
+      // Linha "crua" (sem markdown) — usada para "Você" e erros
+      const renderLine = (who, text, cls) => {
+        const div = document.createElement("div");
+        div.className = "line";
+        div.innerHTML = `<span class="tag ${cls}">${who}:</span> <span>${escapeHtml(
+          text
+        )}</span>`;
+        $chat.appendChild(div);
+        $chat.scrollTop = $chat.scrollHeight;
+      };
+
+      // Linha do Assistente em Markdown (com sanitização)
+      const renderAssistant = (markdown) => {
+        const html = marked.parse(markdown || "");
+        const safe = DOMPurify.sanitize(html);
+        const div = document.createElement("div");
+        div.className = "line";
+        div.innerHTML = `
+          <span class="tag a">Assistente:</span>
+          <div class="md">${safe}</div>
+        `;
+        $chat.appendChild(div);
+        $chat.scrollTop = $chat.scrollHeight;
+      };
+
+      // Bloco de resumo
+      const renderSummary = (markdown) => {
+        const html = marked.parse(markdown || "");
+        const safe = DOMPurify.sanitize(html);
+        const div = document.createElement("div");
+        div.className = "line";
+        div.innerHTML = `
+          <span class="tag a">Resumo:</span>
+          <div class="md summary">${safe}</div>
+        `;
+        $chat.appendChild(div);
+        $chat.scrollTop = $chat.scrollHeight;
+      };
+
+      // Habilita/desabilita input e botão para evitar múltiplos envios
+      function setSendingState(isSending) {
+        $btn.disabled = isSending || !$inp.value.trim();
+        $inp.disabled = isSending;
+      }
+
+      // Habilita o botão quando há texto válido
+      $inp.addEventListener("input", () => setSendingState(false));
+
+      // =============== Helpers de API ===============
+      // Wrapper genérico para POST JSON → retorna o JSON já parseado ou lança erro com detalhe
+      async function apiPost(path, payload) {
+        const r = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload || {}),
+        });
+
+        // Tenta parsear JSON mesmo em erro para extrair {error|detail}
+        const data = await r.json().catch(() => ({}));
+
+        if (!r.ok) {
+          const msg = data?.error || data?.detail || `HTTP ${r.status}`;
+          throw new Error(msg);
+        }
+        return data;
+      }
+
+      // Pergunta normal
+      const ask = (question) =>
+        apiPost("/api/ask", { question }).then((d) => d.answer);
+
+      // Resumo das últimas 3
+      const summarize = (qa) =>
+        apiPost("/api/summarize", { qa }).then((d) => d.summary);
+
+      // ======= Controller =======
+      async function onSend() {
+        const text = $inp.value.trim();
+        if (!text) return;
+
+        setSendingState(true);
+        renderLine("Você", text, "q");
+        $inp.value = "";
+
+        try {
+          const answer = await ask(text);
+          renderAssistant(answer);
+          history.push({ q: text, a: answer });
+
+          // A cada 3 interações, chamar o resumo
+          if (history.length % 3 === 0) {
+            const slice = history.slice(-3);
+            const sum = await summarize(slice);
+            renderSummary(sum);
+          }
+        } catch (e) {
+          renderLine("Erro", e?.message || String(e), "a");
+        } finally {
+          setSendingState(false);
+          $inp.focus();
+        }
+      }
+
+      // Cliques e Enter para enviar
+      $btn.addEventListener("click", onSend);
+      $inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") onSend();
+      });
+
+      // Foco inicial no input e estado inicial do botão
+      window.addEventListener("load", () => {
+        $inp.focus();
+        setSendingState(false);
+      });
+    </script>
+  </body>
+</html>
