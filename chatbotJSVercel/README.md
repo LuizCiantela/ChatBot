@@ -6,7 +6,7 @@ Frontend simples (HTML/CSS/JS) renderiza Markdown com **marked** e sanitiza com 
 ## 🎥 Vídeo da execução
 
 Assista à demonstração no YouTube:  
-➡️ **https://youtu.be/SEU_VIDEO_AQUI**
+➡️ **https://youtu.be/8zZTY2Hrpwo**
 
 ---
 
